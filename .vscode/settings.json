@@ -1,5 +1,5 @@
 {
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/builddir/compile_commands.json",
+  "C_Cpp.default.compileCommands": "/home/plarsen/labs/gnomekiosk-demo/builddir/compile_commands.json",
   "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild",
   "C_Cpp.default.compilerPath": "/usr/bin/cc",
   "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",

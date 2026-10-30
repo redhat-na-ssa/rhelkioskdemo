@@ -1,0 +1,6 @@
+---
+# Full gnome-kiosk provisioning (playbook-gnome-kiosk.yml).
+# Fast deploy uses tasks_from: app.yml or all.yml via playbook-deploy.yml.
+
+- name: Provision gnome-kiosk infrastructure
+  ansible.builtin.import_tasks: infra.yml

@@ -1,0 +1,13 @@
+---
+kiosk_user: kioskusr
+kiosk_password: welcome1
+
+app_bin_local: "{{ playbook_dir }}/../build/{{ app_name }}"
+
+rdp_username: kioskusr
+rdp_password: welcome1
+keyring_password: welcome1
+
+deploy_component: app
+deploy_reboot: false
+deploy_skip_build: false

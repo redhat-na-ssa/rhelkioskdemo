@@ -1,0 +1,23 @@
+---
+- name: Ensure kiosk user bin directory exists
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/.local/bin"
+    state: directory
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  tags:
+    - app
+
+- name: Copy demo app binary
+  ansible.builtin.copy:
+    src: "{{ app_bin_local }}"
+    dest: "/home/{{ kiosk_user }}/.local/bin/{{ app_name }}"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  notify: Restart kiosk app
+  tags:
+    - app

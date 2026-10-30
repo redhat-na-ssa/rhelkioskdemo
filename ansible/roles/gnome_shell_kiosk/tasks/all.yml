@@ -1,0 +1,6 @@
+---
+- name: Deploy app binary
+  ansible.builtin.import_tasks: app.yml
+
+- name: Deploy Shell extension
+  ansible.builtin.import_tasks: extension.yml

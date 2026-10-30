@@ -1,0 +1,80 @@
+# Fast iterative deploy. Builds the binary locally, copies it (and/or the
+# extension) to the target VM, and restarts the app without a full
+# provision or reboot. Use -l to limit to a single host and -e to set
+# deploy_target (kiosk|shell), deploy_component (app|extension|all),
+# deploy_skip_build (true to skip the build step), and deploy_reboot
+# (true to force a reboot after deploy).
+---
+- name: Pre-flight variable validation
+  hosts: all
+  connection: local
+  gather_facts: false
+  roles:
+    - { role: preflight, run_once: true }
+
+- name: Build demo binary on controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    deploy_component: app
+    deploy_reboot: false
+    deploy_skip_build: false
+    deploy_target: shell
+  tasks:
+    - name: Build gnome-kiosk binary
+      community.general.make:
+        chdir: "{{ playbook_dir }}/.."
+      when:
+        - not deploy_skip_build | bool
+        - deploy_target == 'kiosk'
+
+    - name: Build gnome-shell binary
+      community.general.make:
+        chdir: "{{ playbook_dir }}/.."
+        target: shell
+      when:
+        - not deploy_skip_build | bool
+        - deploy_target == 'shell'
+
+- name: Fast deploy to gnome-kiosk hosts
+  hosts: gnome_kiosk_hosts
+  gather_facts: false
+  vars:
+    deploy_component: app
+    deploy_reboot: false
+    deploy_skip_build: false
+    deploy_target: kiosk
+  tasks:
+    - name: Run kiosk fast deploy
+      ansible.builtin.import_role:
+        name: gnome_kiosk
+        tasks_from: "{{ deploy_component if deploy_component in ['app', 'all'] else 'app' }}.yml"
+      when: deploy_target == 'kiosk'
+
+- name: Fast deploy to gnome-shell hosts
+  hosts: gnome_shell_hosts
+  gather_facts: false
+  vars:
+    deploy_component: app
+    deploy_reboot: false
+    deploy_skip_build: false
+    deploy_target: shell
+  tasks:
+    - name: Run shell fast deploy
+      ansible.builtin.import_role:
+        name: gnome_shell_kiosk
+        tasks_from: "{{ deploy_component if deploy_component in ['app', 'extension', 'all'] else 'app' }}.yml"
+      when: deploy_target == 'shell'
+
+- name: Optional forced reboot after deploy
+  hosts: gnome_kiosk_hosts:gnome_shell_hosts
+  gather_facts: false
+  vars:
+    deploy_reboot: false
+  tasks:
+    - name: Reboot host to pick up changes
+      ansible.builtin.reboot:
+        reboot_timeout: 180
+      become: true
+      when: deploy_reboot | bool

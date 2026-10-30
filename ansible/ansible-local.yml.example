@@ -1,0 +1,11 @@
+# Personal variable overrides for the gnomekiosk-demo project.
+# Copy to ~/.config/gnomekiosk-demo/ansible-local.yml
+# This file is auto-loaded (optional) by the preflight role and can override
+# any non-connection variable defined in group_vars/.
+#
+# Connection vars (ansible_host, ansible_ssh_private_key_file) must be
+# overridden in ansible/inventories/local.ini instead.
+---
+# kiosk_password: my-stronger-password
+# rdp_password: my-rdp-password
+# keyring_password: my-keyring-password

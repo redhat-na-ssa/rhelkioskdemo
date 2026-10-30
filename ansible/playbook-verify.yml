@@ -1,0 +1,18 @@
+# Post-deploy smoke tests. Checks that the binary is installed, the app
+# process or systemd service is running, the Shell extension responds
+# (gnome-shell hosts), and RDP is listening. Use -l to target a specific
+# host. Automatically skips runtime checks if the VM hasn't been fully
+# provisioned yet.
+---
+- name: Pre-flight variable validation
+  hosts: all
+  connection: local
+  gather_facts: false
+  roles:
+    - { role: preflight, run_once: true }
+
+- name: Verify kiosk and shell demo VMs
+  hosts: gnome_kiosk_hosts:gnome_shell_hosts
+  gather_facts: false
+  roles:
+    - kiosk_verify

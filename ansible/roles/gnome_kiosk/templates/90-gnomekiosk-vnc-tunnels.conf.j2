@@ -1,0 +1,21 @@
+Match User {{ ssh_tunnel_user_a }}
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication no
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:{{ ssh_tunnel_port_a }}
+    ForceCommand /usr/bin/sleep infinity
+
+Match User {{ ssh_tunnel_user_b }}
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication no
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:{{ ssh_tunnel_port_b }}
+    ForceCommand /usr/bin/sleep infinity

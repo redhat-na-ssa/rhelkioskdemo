@@ -1,3 +1,4 @@
 build/
 builddir/
+ansible/inventories/local.ini
 .ansible/

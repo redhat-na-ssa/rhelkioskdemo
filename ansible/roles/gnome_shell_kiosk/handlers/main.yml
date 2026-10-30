@@ -1,4 +1,25 @@
 ---
-- name: dconf update
+- name: Dconf update  # noqa: no-changed-when
   ansible.builtin.command: dconf update
   become: true
+
+- name: Restart demo app  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: systemctl --user -M {{ kiosk_user }}@ restart {{ app_name }}.service
+  become: true
+  register: gnome_shell_kiosk_restart_result
+  changed_when: gnome_shell_kiosk_restart_result.rc == 0
+  failed_when: false
+
+- name: Reload kiosk extension
+  ansible.builtin.shell: |
+    set -e
+    uid=$(id -u {{ kiosk_user }})
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+    runuser -u {{ kiosk_user }} -- gnome-extensions disable '{{ extension_uuid }}' || true
+    runuser -u {{ kiosk_user }} -- gnome-extensions enable '{{ extension_uuid }}'
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: true
+  failed_when: false

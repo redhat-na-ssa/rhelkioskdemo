@@ -1,0 +1,37 @@
+---
+- name: Load personal overrides (optional)
+  ansible.builtin.include_vars:
+    file: "{{ lookup('env', 'HOME') }}/.config/gnomekiosk-demo/ansible-local.yml"
+  register: preflight_personal_overrides
+  failed_when: >-
+    preflight_personal_overrides is failed
+    and 'Could not find or access' not in (preflight_personal_overrides.message | default(''))
+
+- name: Collect unresolved change-me variables
+  ansible.builtin.set_fact:
+    preflight_changeme_violations: >-
+      {{
+        (groups['all'] | map('extract', hostvars, 'ansible_host')
+         | select('equalto', 'change-me') | list
+         | map('regex_replace', '.*', 'ansible_host (one or more hosts)') | list | unique)
+        +
+         (groups['all'] | map('extract', hostvars, 'ansible_user')
+         | select('equalto', 'change-me') | list
+         | map('regex_replace', '.*', 'ansible_user (one or more hosts)') | list | unique)
+        +
+        (groups['all'] | map('extract', hostvars, 'ansible_ssh_private_key_file')
+         | select('defined') | select('equalto', 'change-me') | list
+         | map('regex_replace', '.*', 'ansible_ssh_private_key_file') | list | unique)
+      }}
+
+- name: Assert no change-me sentinels remain
+  ansible.builtin.assert:
+    that:
+      - preflight_changeme_violations | length == 0
+    fail_msg: |
+      Required variables still have the 'change-me' sentinel:
+        {{ preflight_changeme_violations | join(', ') }}
+      Create ansible/inventories/local.ini (see local.ini.example) to provide:
+        - ansible_host for each VM
+        - ansible_ssh_private_key_file
+      Optionally override other vars in ~/.config/gnomekiosk-demo/ansible-local.yml

@@ -1,0 +1,8 @@
+---
+- name: Run gnome-kiosk verification checks
+  ansible.builtin.import_tasks: verify_kiosk.yml
+  when: inventory_hostname in groups.get('gnome_kiosk_hosts', [])
+
+- name: Run gnome-shell verification checks
+  ansible.builtin.import_tasks: verify_shell.yml
+  when: inventory_hostname in groups.get('gnome_shell_hosts', [])

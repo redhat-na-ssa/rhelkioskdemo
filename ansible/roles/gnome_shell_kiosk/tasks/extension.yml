@@ -1,0 +1,20 @@
+---
+- name: Remove stale extension directory before re-copying
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/.local/share/gnome-shell/extensions/{{ extension_uuid }}"
+    state: absent
+  become: true
+  tags:
+    - extension
+
+- name: Copy Kiosk Layout Helper extension
+  ansible.builtin.copy:
+    src: "{{ extension_dir_local }}/"
+    dest: "/home/{{ kiosk_user }}/.local/share/gnome-shell/extensions/{{ extension_uuid }}/"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  notify: Reload kiosk extension
+  tags:
+    - extension

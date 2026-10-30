@@ -1,5 +1,17 @@
+# Full provision for gnome-shell kiosk VMs. Installs packages, creates
+# the kiosk user, deploys the binary and Shell extension, configures
+# systemd user units/dconf/GDM/remote access/firewall, and reboots.
+# Defaults to the first host in gnome_shell_hosts when no -l is given;
+# pass -l to target a different host or -l 'host1,host2' for multiple.
 ---
+- name: Pre-flight variable validation
+  hosts: all
+  connection: local
+  gather_facts: false
+  roles:
+    - { role: preflight, run_once: true }
+
 - name: Provision gnome-shell kiosk VM
-  hosts: gnome_shell_hosts
+  hosts: "{{ ansible_limit | default(groups['gnome_shell_hosts'][0]) }}"
   roles:
     - gnome_shell_kiosk

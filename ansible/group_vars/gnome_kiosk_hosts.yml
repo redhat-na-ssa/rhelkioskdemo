@@ -1,0 +1,28 @@
+---
+app_name: gnomekiosk-demo
+launcher_script_local: "{{ playbook_dir }}/../scripts/gnome-kiosk-script.sh"
+
+enable_remote_access: "1"
+enable_rdp: "1"
+enable_vnc: "1"
+enable_vnc_fanout: true
+vnc_fanout_ports:
+  - 5901
+  - 5902
+enable_ssh_vnc_tunnels: true
+ssh_tunnel_user_a: user
+ssh_tunnel_password_a: user
+ssh_tunnel_port_a: 5901
+ssh_tunnel_user_b: supervisor
+ssh_tunnel_password_b: supervisor
+ssh_tunnel_port_b: 5902
+vnc_password: welcome1
+vnc_auth_method: password
+reset_keyring: true
+
+deploy_target: kiosk
+
+# auto: runtime checks only when gnome-kiosk-script is installed (full provision)
+# deploy: binary-only checks after fast deploy
+# full: always require running process + RDP
+kiosk_verify_scope: auto

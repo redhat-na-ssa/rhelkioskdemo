@@ -1,13 +1,9 @@
 ---
-kiosk_user: kioskusr
-kiosk_password: welcome1
-
 app_name: gnomekiosk-demo-shell
-app_bin_local: "{{ playbook_dir }}/../build/{{ app_name }}"
 
 extension_uuid: kiosk-layout-helper@gnomekiosk.demo
 extension_dir_local: "{{ playbook_dir }}/../gnome-shell-extension/{{ extension_uuid }}"
 
-rdp_username: kioskusr
-rdp_password: welcome1
-keyring_password: welcome1
+deploy_target: shell
+
+kiosk_verify_scope: auto

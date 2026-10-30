@@ -1,0 +1,379 @@
+---
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - gnome-kiosk
+      - gnome-kiosk-script-session
+      - gdm
+      - accountsservice
+      - gtk4
+      - dconf
+      - gnome-remote-desktop
+      - openssl
+      - seahorse
+      - socat
+      - firewalld
+      - python3-firewall
+    state: present
+  become: true
+  tags:
+    - infra
+
+- name: Ensure firewalld is running
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
+  tags:
+    - infra
+
+- name: Create kiosk user
+  ansible.builtin.user:
+    name: "{{ kiosk_user }}"
+    shell: /bin/bash
+    password: "{{ kiosk_password | password_hash('sha512') }}"
+    state: present
+  become: true
+  tags:
+    - infra
+
+- name: Ensure AccountsService users directory exists
+  ansible.builtin.file:
+    path: /var/lib/AccountsService/users
+    state: directory
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Configure AccountsService session for kiosk user
+  ansible.builtin.template:
+    src: accountsservice-user.j2
+    dest: "/var/lib/AccountsService/users/{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Create kiosk user directories
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/{{ item }}"
+    state: directory
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  loop:
+    - .local
+    - .config
+    - .local/bin
+    - .config/gnome-kiosk-demo
+    - .config/systemd/user/default.target.wants
+    - .local/share/keyrings
+  tags:
+    - infra
+
+- name: Install kiosk launcher script
+  ansible.builtin.copy:
+    src: "{{ launcher_script_local }}"
+    dest: "/home/{{ kiosk_user }}/.local/bin/gnome-kiosk-script"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Deploy factory layout config
+  ansible.builtin.copy:
+    src: layout-factory.ini
+    dest: "/home/{{ kiosk_user }}/.config/gnome-kiosk-demo/layout-factory.ini"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Install demo app binary
+  ansible.builtin.include_tasks: app.yml
+  tags:
+    - infra
+
+- name: Prevent gnome-remote-desktop from auto-starting before kiosk boot logic
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/.config/systemd/user/default.target.wants/{{ item }}"
+    state: absent
+  become: true
+  loop:
+    - gnome-remote-desktop.service
+    - gnome-remote-desktop-headless.service
+  tags:
+    - infra
+
+- name: Reset kiosk user keyring when requested
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/.local/share/keyrings/{{ item }}"
+    state: absent
+  become: true
+  loop:
+    - login.keyring
+    - user.keystore
+  when: reset_keyring | bool
+  tags:
+    - infra
+
+- name: Write remote-access credentials env file
+  ansible.builtin.template:
+    src: remote-access.env.j2
+    dest: "/home/{{ kiosk_user }}/.config/gnome-kiosk-demo/remote-access.env"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0600"
+  become: true
+  tags:
+    - infra
+
+- name: Configure GDM autologin enable
+  community.general.ini_file:
+    path: /etc/gdm/custom.conf
+    section: daemon
+    option: AutomaticLoginEnable
+    value: "True"
+    mode: "0644"
+    no_extra_spaces: true
+  become: true
+  tags:
+    - infra
+
+- name: Configure GDM autologin user
+  community.general.ini_file:
+    path: /etc/gdm/custom.conf
+    section: daemon
+    option: AutomaticLogin
+    value: "{{ kiosk_user }}"
+    mode: "0644"
+    no_extra_spaces: true
+  become: true
+  tags:
+    - infra
+
+- name: Ensure dconf db directory exists
+  ansible.builtin.file:
+    path: /etc/dconf/db/local.d
+    state: directory
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Install power/idle dconf settings
+  ansible.builtin.copy:
+    src: 00-kiosk-power
+    dest: /etc/dconf/db/local.d/00-kiosk-power
+    mode: "0644"
+  become: true
+  notify: Dconf update
+  tags:
+    - infra
+
+- name: Install window-placement dconf settings
+  ansible.builtin.copy:
+    src: 02-kiosk-window-placement
+    dest: /etc/dconf/db/local.d/02-kiosk-window-placement
+    mode: "0644"
+  become: true
+  notify: Dconf update
+  tags:
+    - infra
+
+- name: Install remote-desktop dconf settings
+  ansible.builtin.copy:
+    src: 01-kiosk-remote-desktop
+    dest: /etc/dconf/db/local.d/01-kiosk-remote-desktop
+    mode: "0644"
+  become: true
+  notify: Dconf update
+  tags:
+    - infra
+
+- name: Flush handlers so dconf is applied before linger/reboot
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - infra
+
+- name: Enable lingering for kiosk user
+  ansible.builtin.command:
+    cmd: loginctl enable-linger {{ kiosk_user }}
+    creates: /var/lib/systemd/linger/{{ kiosk_user }}
+  become: true
+  tags:
+    - infra
+
+- name: Install VNC fanout systemd unit template
+  ansible.builtin.copy:
+    src: gnomekiosk-vnc-fanout@.service
+    dest: /etc/systemd/system/gnomekiosk-vnc-fanout@.service
+    mode: "0644"
+  become: true
+  notify: Reload systemd
+  tags:
+    - infra
+
+- name: Remove legacy VNC fanout socket units
+  ansible.builtin.file:
+    path: /etc/systemd/system/gnomekiosk-vnc-fanout@.socket
+    state: absent
+  become: true
+  notify: Reload systemd
+  tags:
+    - infra
+
+- name: Disable legacy VNC fanout socket instances
+  ansible.builtin.systemd:
+    name: "gnomekiosk-vnc-fanout@{{ item }}.socket"
+    enabled: false
+    state: stopped
+  become: true
+  loop:
+    - "5901"
+    - "5902"
+  failed_when: false
+  tags:
+    - infra
+
+- name: Enable VNC fanout proxy services
+  ansible.builtin.systemd:
+    name: "gnomekiosk-vnc-fanout@{{ item }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  loop: "{{ vnc_fanout_ports }}"
+  when: enable_vnc_fanout | bool
+  tags:
+    - infra
+
+- name: Disable VNC fanout proxy services
+  ansible.builtin.systemd:
+    name: "gnomekiosk-vnc-fanout@{{ item }}.service"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  become: true
+  loop: "{{ vnc_fanout_ports }}"
+  when: not enable_vnc_fanout | bool
+  tags:
+    - infra
+
+- name: Open RDP port in firewalld
+  ansible.posix.firewalld:
+    port: 3389/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  register: gnome_kiosk_firewalld_rdp
+  failed_when:
+    - gnome_kiosk_firewalld_rdp is failed
+    - "'not running' not in (gnome_kiosk_firewalld_rdp.msg | default('') | lower)"
+  tags:
+    - infra
+
+- name: Open VNC port in firewalld
+  ansible.posix.firewalld:
+    port: 5900/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  register: gnome_kiosk_firewalld_vnc
+  failed_when:
+    - gnome_kiosk_firewalld_vnc is failed
+    - "'not running' not in (gnome_kiosk_firewalld_vnc.msg | default('') | lower)"
+  tags:
+    - infra
+
+- name: Open VNC fanout ports in firewalld
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ vnc_fanout_ports }}"
+  when: enable_vnc_fanout | bool
+  register: gnome_kiosk_firewalld_fanout
+  failed_when:
+    - gnome_kiosk_firewalld_fanout is failed
+    - "'not running' not in (gnome_kiosk_firewalld_fanout.msg | default('') | lower)"
+  tags:
+    - infra
+
+- name: Create SSH tunnel user A
+  ansible.builtin.user:
+    name: "{{ ssh_tunnel_user_a }}"
+    shell: /bin/bash
+    password: "{{ ssh_tunnel_password_a | password_hash('sha512') }}"
+    state: present
+  become: true
+  when: enable_ssh_vnc_tunnels | bool
+  tags:
+    - infra
+
+- name: Create SSH tunnel user B
+  ansible.builtin.user:
+    name: "{{ ssh_tunnel_user_b }}"
+    shell: /bin/bash
+    password: "{{ ssh_tunnel_password_b | password_hash('sha512') }}"
+    state: present
+  become: true
+  when: enable_ssh_vnc_tunnels | bool
+  tags:
+    - infra
+
+- name: Install SSH tunnel restrictions
+  ansible.builtin.template:
+    src: 90-gnomekiosk-vnc-tunnels.conf.j2
+    dest: /etc/ssh/sshd_config.d/90-gnomekiosk-vnc-tunnels.conf
+    mode: "0644"
+  become: true
+  notify: Reload sshd
+  when: enable_ssh_vnc_tunnels | bool
+  tags:
+    - infra
+
+- name: Remove SSH tunnel restrictions
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/90-gnomekiosk-vnc-tunnels.conf
+    state: absent
+  become: true
+  notify: Reload sshd
+  when: not enable_ssh_vnc_tunnels | bool
+  tags:
+    - infra
+
+- name: Set default target to graphical
+  ansible.builtin.command: systemctl set-default graphical.target
+  become: true
+  changed_when: false
+  tags:
+    - infra
+
+- name: Enable GDM for kiosk autologin
+  ansible.builtin.systemd:
+    name: gdm
+    enabled: true
+    state: started
+  become: true
+  tags:
+    - infra
+
+- name: Reboot to apply session/lockdown changes
+  ansible.builtin.reboot:
+    reboot_timeout: 180
+  become: true
+  tags:
+    - infra
+    - reboot

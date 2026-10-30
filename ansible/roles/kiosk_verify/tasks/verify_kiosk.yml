@@ -1,0 +1,75 @@
+---
+- name: Verify demo binary is installed
+  ansible.builtin.stat:
+    path: "/home/{{ kiosk_user }}/.local/bin/{{ app_name }}"
+  become: true
+  register: kiosk_verify_binary_stat
+
+- name: Assert demo binary is installed
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_binary_stat.stat.exists
+    fail_msg: >-
+      Binary not found at /home/{{ kiosk_user }}/.local/bin/{{ app_name }}.
+      Run playbook-deploy.yml first.
+
+- name: Check whether kiosk session has been provisioned
+  ansible.builtin.stat:
+    path: "/home/{{ kiosk_user }}/.local/bin/gnome-kiosk-script"
+  become: true
+  register: kiosk_verify_launcher_stat
+
+- name: Determine whether to run runtime verification
+  ansible.builtin.set_fact:
+    kiosk_verify_runtime: >-
+      {{
+        (kiosk_verify_scope == 'full')
+        or (kiosk_verify_scope == 'auto' and kiosk_verify_launcher_stat.stat.exists)
+      }}
+
+- name: Report deploy-only verification (kiosk not fully provisioned)
+  ansible.builtin.debug:
+    msg: >-
+      Binary deploy OK. Skipping process/RDP checks because gnome-kiosk-script
+      is not installed. Run playbook-gnome-kiosk.yml for full kiosk provision.
+  when:
+    - kiosk_verify_scope == 'auto'
+    - not kiosk_verify_runtime | bool
+
+- name: Fail when full verify requested but kiosk is not provisioned
+  ansible.builtin.fail:
+    msg: >-
+      Full verification requires kiosk provision (gnome-kiosk-script, GDM, RDP).
+      Run: ansible-playbook playbook-gnome-kiosk.yml -l {{ inventory_hostname }}
+  when:
+    - kiosk_verify_scope == 'full'
+    - not kiosk_verify_launcher_stat.stat.exists
+
+- name: Check kiosk demo process is running
+  ansible.builtin.command:
+    cmd: pgrep -u {{ kiosk_user }} -x {{ app_name }}
+  register: kiosk_verify_demo_pgrep
+  changed_when: false
+  failed_when: false
+  retries: 12
+  delay: 10
+  until: kiosk_verify_demo_pgrep.rc == 0
+  when: kiosk_verify_runtime | bool
+
+- name: Assert kiosk demo process is running
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_demo_pgrep.rc == 0
+      - kiosk_verify_demo_pgrep.stdout | length > 0
+    fail_msg: >-
+      No {{ app_name }} process for {{ kiosk_user }}.
+      Kiosk session may not be active — try reboot after playbook-gnome-kiosk.yml.
+  when: kiosk_verify_runtime | bool
+
+- name: Verify RDP port is listening
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3389
+    timeout: 5
+    state: started
+  when: kiosk_verify_runtime | bool

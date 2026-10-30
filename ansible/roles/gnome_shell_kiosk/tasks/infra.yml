@@ -1,0 +1,292 @@
+---
+# Import the repo key with rpm --import before DNF so libdnf does not have to
+# parse /etc/pki/rpm-gpg/* itself. RHEL 10 Sequoia rejects
+# ISV-Container-signing-key (text preamble + armor), which is the
+# "Parsing armored OpenPGP packet(s) failed" failure.
+- name: Import Red Hat release GPG key
+  ansible.builtin.rpm_key:
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+    state: present
+  become: true
+  tags:
+    - infra
+
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - gnome-shell
+      - gdm
+      - gtk4
+      - dconf
+      - gnome-remote-desktop
+      - openssl
+      - seahorse
+      - firewalld
+      - python3-firewall
+    state: present
+  become: true
+  tags:
+    - infra
+
+- name: Ensure firewalld is running
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
+  tags:
+    - infra
+
+- name: Create kiosk user
+  ansible.builtin.user:
+    name: "{{ kiosk_user }}"
+    shell: /bin/bash
+    password: "{{ kiosk_password | password_hash('sha512') }}"
+    state: present
+  become: true
+  tags:
+    - infra
+
+- name: Ensure AccountsService users directory exists
+  ansible.builtin.file:
+    path: /var/lib/AccountsService/users
+    state: directory
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Configure AccountsService session for kiosk user
+  ansible.builtin.template:
+    src: accountsservice-user.j2
+    dest: "/var/lib/AccountsService/users/{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Create kiosk user directories
+  ansible.builtin.file:
+    path: "/home/{{ kiosk_user }}/{{ item }}"
+    state: directory
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  loop:
+    - .local
+    - .config
+    - .local/bin
+    - .local/share
+    - .local/share/gnome-shell
+    - .local/share/gnome-shell/extensions
+    - .config/gnome-kiosk-demo
+    - .config/systemd/user
+    - .config/systemd/user/graphical-session.target.wants
+  tags:
+    - infra
+
+- name: Deploy demo app binary during full provision
+  ansible.builtin.import_tasks: app.yml
+
+- name: Deploy Shell extension during full provision
+  ansible.builtin.import_tasks: extension.yml
+
+- name: Deploy factory layout config
+  ansible.builtin.copy:
+    src: layout-factory.ini
+    dest: "/home/{{ kiosk_user }}/.config/gnome-kiosk-demo/layout-factory.ini"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Write remote-access credentials env file
+  ansible.builtin.template:
+    src: remote-access.env.j2
+    dest: "/home/{{ kiosk_user }}/.config/gnome-kiosk-demo/remote-access.env"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0600"
+  become: true
+  tags:
+    - infra
+
+- name: Install remote-access setup script
+  ansible.builtin.copy:
+    src: remote-access-setup.sh
+    dest: "/home/{{ kiosk_user }}/.local/bin/gnomekiosk-remote-access-setup.sh"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Install remote-access-setup systemd user unit
+  ansible.builtin.copy:
+    src: gnomekiosk-remote-access-setup.service
+    dest: "/home/{{ kiosk_user }}/.config/systemd/user/gnomekiosk-remote-access-setup.service"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Install demo-app systemd user unit
+  ansible.builtin.template:
+    src: gnomekiosk-demo-shell.service.j2
+    dest: "/home/{{ kiosk_user }}/.config/systemd/user/{{ app_name }}.service"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Install session focus-guard script
+  ansible.builtin.copy:
+    src: gnomekiosk-session-focus-guard.sh
+    dest: "/home/{{ kiosk_user }}/.local/bin/gnomekiosk-session-focus-guard.sh"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Install Wayland readiness wait script
+  ansible.builtin.copy:
+    src: gnomekiosk-wait-wayland.sh
+    dest: "/home/{{ kiosk_user }}/.local/bin/gnomekiosk-wait-wayland.sh"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Install session focus-guard systemd user unit
+  ansible.builtin.copy:
+    src: gnomekiosk-session-focus-guard.service
+    dest: "/home/{{ kiosk_user }}/.config/systemd/user/gnomekiosk-session-focus-guard.service"
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    mode: "0644"
+  become: true
+  tags:
+    - infra
+
+- name: Enable systemd user units via graphical-session.target.wants symlinks
+  ansible.builtin.file:
+    src: "../{{ item }}"
+    dest: "/home/{{ kiosk_user }}/.config/systemd/user/graphical-session.target.wants/{{ item }}"
+    state: link
+    owner: "{{ kiosk_user }}"
+    group: "{{ kiosk_user }}"
+    force: true
+  become: true
+  loop:
+    - gnomekiosk-session-focus-guard.service
+    - gnomekiosk-remote-access-setup.service
+    - "{{ app_name }}.service"
+  tags:
+    - infra
+
+- name: Configure GDM autologin enable
+  community.general.ini_file:
+    path: /etc/gdm/custom.conf
+    section: daemon
+    option: AutomaticLoginEnable
+    value: "True"
+    mode: "0644"
+    no_extra_spaces: true
+  become: true
+  tags:
+    - infra
+
+- name: Configure GDM autologin user
+  community.general.ini_file:
+    path: /etc/gdm/custom.conf
+    section: daemon
+    option: AutomaticLogin
+    value: "{{ kiosk_user }}"
+    mode: "0644"
+    no_extra_spaces: true
+  become: true
+  tags:
+    - infra
+
+- name: Ensure dconf db directory exists
+  ansible.builtin.file:
+    path: /etc/dconf/db/local.d
+    state: directory
+    mode: "0755"
+  become: true
+  tags:
+    - infra
+
+- name: Install power/idle dconf settings
+  ansible.builtin.copy:
+    src: 00-kiosk-power
+    dest: /etc/dconf/db/local.d/00-kiosk-power
+    mode: "0644"
+  become: true
+  notify: Dconf update
+  tags:
+    - infra
+
+- name: Install kiosk lockdown dconf settings
+  ansible.builtin.template:
+    src: 01-kiosk-lockdown.j2
+    dest: /etc/dconf/db/local.d/01-kiosk-lockdown
+    mode: "0644"
+  become: true
+  notify: Dconf update
+  tags:
+    - infra
+
+- name: Flush handlers now so dconf is applied before enable-linger/reboot
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - infra
+
+- name: Enable lingering for kiosk user
+  ansible.builtin.command:
+    cmd: loginctl enable-linger {{ kiosk_user }}
+    creates: /var/lib/systemd/linger/{{ kiosk_user }}
+  become: true
+  tags:
+    - infra
+
+- name: Open RDP port in firewalld
+  ansible.posix.firewalld:
+    port: 3389/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  register: gnome_shell_kiosk_firewalld_rdp
+  failed_when:
+    - gnome_shell_kiosk_firewalld_rdp is failed
+    - "'not running' not in (gnome_shell_kiosk_firewalld_rdp.msg | default('') | lower)"
+  tags:
+    - infra
+
+- name: Set default target to graphical
+  ansible.builtin.command: systemctl set-default graphical.target
+  become: true
+  changed_when: false
+  tags:
+    - infra
+
+- name: Reboot to apply session/lockdown changes
+  ansible.builtin.reboot:
+    reboot_timeout: 180
+  become: true
+  tags:
+    - infra
+    - reboot

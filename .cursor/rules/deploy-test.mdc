@@ -1,0 +1,61 @@
+---
+description: Deploy and verify SOP for gnomekiosk-demo Ansible pipeline
+globs:
+  - ansible/**
+  - src/**
+  - gnome-shell-extension/**
+alwaysApply: false
+---
+
+# Deploy-test agent SOP
+
+Run all playbooks from the `ansible/` directory.
+
+## Default hosts
+
+| Target | Inventory host | IP |
+|--------|----------------|-----|
+| gnome-kiosk | `rhel10` | 192.168.122.81 |
+| gnome-shell | `rhel10-atop` | 192.168.122.111 |
+
+Always pass `-l <host>` so deploy does not hit both groups.
+
+## After code changes
+
+| What changed | Command |
+|--------------|---------|
+| `src/**` (kiosk build) | `ansible-playbook playbook-deploy.yml -l rhel10 -e deploy_component=app -e deploy_target=kiosk` |
+| `src/**` (shell build) | `ansible-playbook playbook-deploy.yml -l rhel10-atop -e deploy_component=app -e deploy_target=shell` |
+| `gnome-shell-extension/**` | `ansible-playbook playbook-deploy.yml -l rhel10-atop -e deploy_component=extension -e deploy_target=shell -e deploy_skip_build=true` |
+| Role templates, systemd units, dconf, GDM | Full provision: `playbook-gnome-kiosk.yml` or `playbook-gnome-shell.yml` |
+
+## Verify after every deploy
+
+```bash
+ansible-playbook playbook-verify.yml -l rhel10        # kiosk
+ansible-playbook playbook-verify.yml -l rhel10-atop   # shell
+```
+
+## Restart vs reboot
+
+- Fast deploy (`playbook-deploy.yml`): hybrid restart by default (systemd/pkill handlers). No reboot.
+- Force reboot: add `-e deploy_reboot=true`
+- Full provision playbooks always reboot.
+
+## On failure
+
+1. Re-run with `-vv`
+2. For shell: check `journalctl --user -M kioskusr@ -u gnomekiosk-demo-shell.service`
+3. Confirm D-Bus Ping returns `kiosk-layout-helper/1`
+
+## Manual visual check (RDP)
+
+```bash
+xfreerdp /v:<vm-ip> /u:kioskusr /p:welcome1
+```
+
+Verify menu bar, radar background, minimize/restore, SAVE/LOAD/RESET.
+
+## Collections
+
+Install once: `ansible-galaxy collection install -r requirements.yml`

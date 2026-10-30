@@ -1,0 +1,21 @@
+---
+- name: Dconf update  # noqa: no-changed-when
+  ansible.builtin.command: dconf update
+  become: true
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Reload sshd
+  ansible.builtin.systemd:
+    name: sshd
+    state: reloaded
+  become: true
+
+- name: Restart kiosk app
+  ansible.builtin.command: pkill -u {{ kiosk_user }} {{ app_name }}
+  become: true
+  failed_when: false
+  changed_when: true

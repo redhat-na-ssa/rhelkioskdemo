@@ -1,0 +1,17 @@
+[Unit]
+Description=Kiosk VNC fanout proxy to localhost:5900
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:%i,reuseaddr,fork TCP:127.0.0.1:5900
+Restart=always
+RestartSec=1
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+
+[Install]
+WantedBy=multi-user.target

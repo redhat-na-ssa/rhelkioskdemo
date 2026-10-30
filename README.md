@@ -14,7 +14,7 @@ The codebase is split so the two targets can never accidentally affect each othe
 | Source | `src/gnome-kiosk.c` + `src/demo-common.c` | `src/gnome-shell.c` + `src/demo-common.c` |
 | Session | `gnome-kiosk` (stripped-down kiosk session) | full `gnome-shell` on Wayland |
 | Extras | none — plain GTK4 only | talks to a custom D-Bus/GJS Shell extension (`gnome-shell-extension/`) for exact position + reliable minimize |
-| Deploy path | `scripts/provision-vm.sh` (bash + scp/ssh) | Ansible (`ansible/playbook-gnome-shell.yml`) |
+| Deploy path | Ansible (`ansible/playbook-gnome-kiosk.yml`) | Ansible (`ansible/playbook-gnome-shell.yml`) |
 | Target VMs | Fedora 44, RHEL 10 | RHEL 10 ("atop" — full-shell variant) |
 
 ## Prerequisites
@@ -22,7 +22,8 @@ The codebase is split so the two targets can never accidentally affect each othe
 - **A libvirt/KVM (or equivalent) hypervisor host**, same CPU architecture as your dev machine (x86_64) — this project builds directly on the dev machine and copies the binary over, so no cross-compilation or remote-build setup is needed, only a normal local build.
 - **One or more target VMs installed with RHEL 10 or Fedora (44+)**. Installation itself isn't covered here — use whatever standard RHEL/Fedora install process you'd normally use (installer ISO, kickstart, etc.); a plain workstation/server install with network access from your dev machine is enough to start from. RHEL 10 is the primary target; Fedora tracks newer GNOME/Mutter versions ahead of RHEL and is used as a secondary comparison point (see `CLAUDE.md` for why several behaviors differ between the two).
 - **Local build tooling**: a C11 compiler, `pkg-config`, GTK4 development headers (`gtk4-devel` or equivalent), and either `make` or `meson` (>=1.2.0) + `ninja`.
-- **Ansible** on your dev machine, only if you're targeting the `gnome-shell` build (`pip install ansible` or your distro's package).
+- **Ansible** on your dev machine (`pip install ansible` or your distro's package), for both deploy targets.
+- **Ansible collections** (once): `cd ansible && ansible-galaxy collection install -r requirements.yml` (installs `community.general` and `ansible.posix`).
 
 ## Editor setup (VS Code)
 
@@ -79,19 +80,60 @@ or with meson: `meson setup builddir && ninja -C builddir`.
 
 ## Deploying
 
-**`gnome-kiosk` target** (Fedora 44 / RHEL 10, plain build): a single env-var-driven script, no Ansible involved.
+Install Ansible collections once:
+
 ```bash
-HOST=192.168.122.81 ./scripts/provision-vm.sh
+cd ansible && ansible-galaxy collection install -r requirements.yml
 ```
 
-**`gnome-shell` target** (RHEL 10 "atop"): Ansible role, from the `ansible/` directory.
+### Full provision (infra + reboot)
+
+**`gnome-kiosk` target** (Fedora 44 / RHEL 10):
+
 ```bash
-ansible-playbook -i inventory.ini playbook-gnome-shell.yml
+cd ansible
+ansible-playbook playbook-gnome-kiosk.yml -l rhel10
 ```
-This installs packages, creates `kioskusr`, deploys the binary and Shell extension, configures remote access/dconf/GDM, and reboots. For an app-binary-only or extension-only change that doesn't need fresh dconf/systemd/GDM state (and so doesn't need a reboot), push it directly instead:
+
+(`scripts/provision-vm.sh` is a thin wrapper around the same playbook.)
+
+**`gnome-shell` target** (RHEL 10 "atop"):
+
 ```bash
-ansible gnome_shell_hosts -m ansible.builtin.copy -a "src=../build/gnomekiosk-demo-shell dest=/usr/local/bin/gnomekiosk-demo-shell mode=0755" --become
+cd ansible
+ansible-playbook playbook-gnome-shell.yml -l rhel10-atop
 ```
+
+### Iterative fast deploy (build + copy + restart, no reboot)
+
+From `ansible/`:
+
+```bash
+# App-only deploy (shell) — builds via community.general.make, copies binary, restarts systemd user unit
+ansible-playbook playbook-deploy.yml -l rhel10-atop -e deploy_component=app -e deploy_target=shell
+
+# App-only deploy (kiosk) — builds, copies binary, pkill restart via launcher loop
+ansible-playbook playbook-deploy.yml -l rhel10 -e deploy_component=app -e deploy_target=kiosk
+
+# Extension-only deploy (shell)
+ansible-playbook playbook-deploy.yml -l rhel10-atop -e deploy_component=extension -e deploy_target=shell -e deploy_skip_build=true
+
+# Force reboot after deploy
+ansible-playbook playbook-deploy.yml -l rhel10-atop -e deploy_component=app -e deploy_target=shell -e deploy_reboot=true
+```
+
+Binary install path on VMs: `/home/kioskusr/.local/bin/gnomekiosk-demo` (kiosk) or `gnomekiosk-demo-shell` (shell).
+
+### Verify (smoke checks)
+
+```bash
+ansible-playbook playbook-verify.yml -l rhel10-atop   # shell
+ansible-playbook playbook-verify.yml -l rhel10        # kiosk
+```
+
+Cursor Tasks under **Terminal → Run Task** mirror these commands (`Deploy: …`, `Verify: …`, `Iterate: …`).
+
+See [`.cursor/rules/deploy-test.mdc`](.cursor/rules/deploy-test.mdc) for the agent SOP.
 
 ## Further reading
 

@@ -1,0 +1,9 @@
+[org/gnome/desktop/remote-desktop/vnc]
+enable=false
+auth-method='password'
+encryption=['none']
+view-only=false
+
+[org/gnome/desktop/remote-desktop/rdp]
+enable=false
+view-only=false

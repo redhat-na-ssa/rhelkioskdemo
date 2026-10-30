@@ -1,0 +1,205 @@
+---
+- name: Verify demo binary is installed
+  ansible.builtin.stat:
+    path: "/home/{{ kiosk_user }}/.local/bin/{{ app_name }}"
+  become: true
+  register: kiosk_verify_binary_stat
+
+- name: Assert demo binary is installed
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_binary_stat.stat.exists
+    fail_msg: >-
+      Binary not found at /home/{{ kiosk_user }}/.local/bin/{{ app_name }}.
+      Run playbook-deploy.yml first.
+
+- name: Check whether shell session has been provisioned
+  ansible.builtin.stat:
+    path: "/home/{{ kiosk_user }}/.config/systemd/user/{{ app_name }}.service"
+  become: true
+  register: kiosk_verify_service_unit_stat
+
+- name: Determine whether to run runtime verification
+  ansible.builtin.set_fact:
+    kiosk_verify_runtime: >-
+      {{
+        (kiosk_verify_scope == 'full')
+        or (kiosk_verify_scope == 'auto' and kiosk_verify_service_unit_stat.stat.exists)
+      }}
+
+- name: Report deploy-only verification (shell not fully provisioned)
+  ansible.builtin.debug:
+    msg: >-
+      Binary deploy OK. Skipping runtime checks because {{ app_name }}.service
+      unit is not installed. Run playbook-gnome-shell.yml for full provision.
+  when:
+    - kiosk_verify_scope == 'auto'
+    - not kiosk_verify_runtime | bool
+
+- name: Fail when full verify requested but shell is not provisioned
+  ansible.builtin.fail:
+    msg: >-
+      Full verification requires shell provision (systemd service, extension, RDP).
+      Run: ansible-playbook playbook-gnome-shell.yml -l {{ inventory_hostname }}
+  when:
+    - kiosk_verify_scope == 'full'
+    - not kiosk_verify_service_unit_stat.stat.exists
+
+- name: Check demo app systemd user service  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: systemctl --user -M {{ kiosk_user }}@ is-active {{ app_name }}.service
+  become: true
+  register: kiosk_verify_demo_service
+  changed_when: false
+  failed_when: false
+  retries: 12
+  delay: 10
+  until: kiosk_verify_demo_service.stdout == 'active'
+  when: kiosk_verify_runtime | bool
+
+- name: Assert demo app service is active
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_demo_service.stdout == 'active'
+    fail_msg: "{{ app_name }}.service is not active: {{ kiosk_verify_demo_service.stdout | default('') }}"
+  when: kiosk_verify_runtime | bool
+
+- name: Check session focus-guard systemd user service  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: systemctl --user -M {{ kiosk_user }}@ is-active gnomekiosk-session-focus-guard.service
+  become: true
+  register: kiosk_verify_focus_guard_service
+  changed_when: false
+  failed_when: false
+  retries: 12
+  delay: 10
+  until: kiosk_verify_focus_guard_service.stdout == 'active'
+  when: kiosk_verify_runtime | bool
+
+- name: Assert session focus-guard service is active
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_focus_guard_service.stdout == 'active'
+    fail_msg: "gnomekiosk-session-focus-guard.service is not active: {{ kiosk_verify_focus_guard_service.stdout | default('') }}"
+  when: kiosk_verify_runtime | bool
+
+- name: Get kiosk user UID
+  ansible.builtin.command:
+    cmd: id -u {{ kiosk_user }}
+  become: true
+  register: kiosk_verify_uid
+  changed_when: false
+  when: kiosk_verify_runtime | bool
+
+- name: Check extension files are deployed
+  ansible.builtin.stat:
+    path: "/home/{{ kiosk_user }}/.local/share/gnome-shell/extensions/{{ extension_uuid }}/metadata.json"
+  become: true
+  register: kiosk_verify_extension_metadata
+  when: kiosk_verify_runtime | bool
+
+- name: Assert extension is deployed
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_extension_metadata.stat.exists
+    fail_msg: >-
+      Extension {{ extension_uuid }} not found on disk.
+      Run playbook-deploy.yml or playbook-gnome-shell.yml to deploy it.
+  when: kiosk_verify_runtime | bool
+
+- name: Check extension enabled state
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ kiosk_user }}"
+      - --
+      - env
+      - "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ kiosk_verify_uid.stdout }}/bus"
+      - gnome-extensions
+      - info
+      - "{{ extension_uuid }}"
+  become: true
+  register: kiosk_verify_extension_info
+  changed_when: false
+  failed_when: false
+  when: kiosk_verify_runtime | bool
+
+- name: Enable extension if disabled
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ kiosk_user }}"
+      - --
+      - env
+      - "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ kiosk_verify_uid.stdout }}/bus"
+      - gnome-extensions
+      - enable
+      - "{{ extension_uuid }}"
+  become: true
+  register: kiosk_verify_extension_enable
+  changed_when: kiosk_verify_extension_enable.rc == 0
+  when:
+    - kiosk_verify_runtime | bool
+    - "'State: ENABLED' not in kiosk_verify_extension_info.stdout | default('')"
+
+- name: Wait for extension to load after enable  # noqa: no-handler
+  ansible.builtin.pause:
+    seconds: 3
+  when:
+    - kiosk_verify_runtime | bool
+    - kiosk_verify_extension_enable is changed
+
+- name: Ping Kiosk Layout Helper over D-Bus
+  ansible.builtin.command:
+    argv:
+      - busctl
+      - --user
+      - -M
+      - "{{ kiosk_user }}@"
+      - call
+      - org.gnome.Shell
+      - /org/gnomekiosk/LayoutHelper
+      - org.gnomekiosk.LayoutHelper
+      - Ping
+  become: true
+  register: kiosk_verify_layout_helper_ping
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 5
+  until: "'kiosk-layout-helper/1' in kiosk_verify_layout_helper_ping.stdout"
+  when: kiosk_verify_runtime | bool
+
+- name: Assert Kiosk Layout Helper extension responds
+  ansible.builtin.assert:
+    that:
+      - "'kiosk-layout-helper/1' in kiosk_verify_layout_helper_ping.stdout"
+    fail_msg: "LayoutHelper Ping failed: {{ kiosk_verify_layout_helper_ping.stdout | default('') }} {{ kiosk_verify_layout_helper_ping.stderr | default('') }}"
+  when: kiosk_verify_runtime | bool
+
+- name: Verify RDP port is listening
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3389
+    timeout: 5
+    state: started
+  when: kiosk_verify_runtime | bool
+
+- name: Check recent demo service journal for failures
+  ansible.builtin.command:
+    cmd: journalctl --user -M {{ kiosk_user }}@ -u {{ app_name }}.service --since "2 min ago" --no-pager
+  become: true
+  register: kiosk_verify_demo_journal
+  changed_when: false
+  failed_when: false
+  when: kiosk_verify_runtime | bool
+
+- name: Assert no recent demo service failures in journal
+  ansible.builtin.assert:
+    that:
+      - kiosk_verify_demo_journal.stdout is not search('Failed')
+      - kiosk_verify_demo_journal.stdout is not search('core dumped')
+    fail_msg: "Recent journal errors for {{ app_name }}: {{ kiosk_verify_demo_journal.stdout }}"
+  when: kiosk_verify_runtime | bool

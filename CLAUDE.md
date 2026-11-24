@@ -107,7 +107,7 @@ Conclusions from the current design discussion:
 - Remote access implementation note: avoid approval/keyring popups in kiosk mode by unlocking keyring at session start (when needed) and using boot-time credential provisioning only.
 - Remote access startup ordering matters: avoid enabling `gnome-remote-desktop.service` persistently for kiosk autologin; start it from kiosk boot logic after keyring/credentials setup.
 - Remote access standard path: use GNOME Remote Desktop (RDP backend) and validate with `xfreerdp` as the primary client.
-- Multi-monitor: support an RDP-based multi-monitor demo if feasible.
+- Multi-monitor: support an RDP-based multi-monitor demo if feasible. Investigation, test VM (`multimonitor`, `192.168.122.232`), and `xfreerdp` multi-monitor commands are in [docs/multi-monitor.md](docs/multi-monitor.md). Key limit: stock gnome-remote-desktop (`mirror-primary`) only sends the primary physical monitor over RDP.
 - Demo data: synthetic flight-control-style data with realistic call signs, locations, and periodic updates.
 - Persistence: keep app state and windows alive across RDP disconnects; add a layout reset control for testing.
 
